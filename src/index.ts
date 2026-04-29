@@ -1,18 +1,82 @@
 #!/usr/bin/env bun
 import { cpus } from "node:os"
-import { resolve } from "node:path"
+import { resolve, join } from "node:path"
+import { readdir, readFile } from "node:fs/promises"
 import { Effect } from "effect"
 import { frontmatter } from "./convert"
 import { discover } from "./discover"
 import { WorkerPool } from "./pool"
 import { createUI } from "./ui"
 import { write } from "./write"
+import { transformDocument, saveTree } from "./ai-memory/index.ts"
 
 interface Config {
 	url: string
 	out: string
 	max: number
+	aiMemory?: boolean
+	aiMemoryOut?: string
 }
+
+/**
+ * Transform scraped markdown files into AI memory structure
+ */
+const transformToAIMemory = (config: Config) =>
+	Effect.gen(function* () {
+		process.stderr.write('\n  \x1b[1m🧠 Transforming to AI memory...\x1b[0m\n')
+		
+		const t0 = performance.now()
+		
+		try {
+			// Read all markdown files from output directory
+			const files = yield* Effect.tryPromise(() => 
+				readdir(config.out, { recursive: true, withFileTypes: true })
+			)
+			
+			const markdownFiles = files
+				.filter(f => f.isFile() && f.name.endsWith('.md'))
+				.map(f => {
+					const parentPath = (f as any).path || (f as any).parentPath || config.out
+					return join(parentPath, f.name)
+				})
+			
+			if (markdownFiles.length === 0) {
+				process.stderr.write('  \x1b[33mNo markdown files found to transform\x1b[0m\n')
+				return
+			}
+			
+			// Concatenate all markdown files into one
+			let combinedContent = ''
+			for (const filepath of markdownFiles) {
+				const content = yield* Effect.tryPromise(() => readFile(filepath, 'utf-8'))
+				if (content.trim()) {
+					combinedContent += content + '\n\n'
+				}
+			}
+			
+			if (!combinedContent.trim()) {
+				process.stderr.write('  \x1b[33mNo content to transform\x1b[0m\n')
+				return
+			}
+			
+			// Transform combined content into one tree
+			const hostname = new URL(config.url).hostname
+			const tree = transformDocument(combinedContent, config.url, hostname)
+			
+			// Save tree
+			const outputPath = join(config.aiMemoryOut || './.ai-memory', `${hostname}.json`)
+			yield* Effect.tryPromise(() => saveTree(tree, outputPath))
+			
+			const elapsed = ((performance.now() - t0) / 1000).toFixed(1)
+			
+			process.stderr.write(
+				`  \x1b[32m✓ Created AI memory with ${tree.stats.totalNodes} nodes (${tree.stats.totalTokens.toLocaleString()} tokens) in ${elapsed}s\x1b[0m\n`
+			)
+			process.stderr.write(`  \x1b[90mSaved to: ${outputPath}\x1b[0m\n`)
+		} catch (error) {
+			process.stderr.write(`  \x1b[31m✗ AI memory transformation failed: ${error}\x1b[0m\n`)
+		}
+	})
 
 const parseArgs = (args: string[]): Config => {
 	if (!args.length || args.includes("-h") || args.includes("--help")) {
@@ -21,8 +85,10 @@ const parseArgs = (args: string[]): Config => {
 
   Usage:  webpull <url> [options]
 
-    -o, --out <dir>   Output directory (default: ./<hostname>)
-    -m, --max <n>     Max pages (default: 500)
+    -o, --out <dir>        Output directory (default: ./<hostname>)
+    -m, --max <n>          Max pages (default: 500)
+    --ai-memory            Transform docs into AI memory structure
+    --ai-memory-out <dir>  AI memory output directory (default: ./.ai-memory)
 `)
 		process.exit(0)
 	}
@@ -40,6 +106,8 @@ const parseArgs = (args: string[]): Config => {
 
 	let out = `./${url.hostname}`
 	let max = 500
+	let aiMemory = false
+	let aiMemoryOut = './.ai-memory'
 
 	for (let i = 1; i < args.length; i++) {
 		const arg = args[i]
@@ -50,10 +118,15 @@ const parseArgs = (args: string[]): Config => {
 		} else if (("-m" === arg || "--max" === arg) && next) {
 			max = +next
 			i++
+		} else if ("--ai-memory" === arg) {
+			aiMemory = true
+		} else if ("--ai-memory-out" === arg && next) {
+			aiMemoryOut = next
+			i++
 		}
 	}
 
-	return { url: url.href, out: resolve(out), max }
+	return { url: url.href, out: resolve(out), max, aiMemory, aiMemoryOut }
 }
 
 const program = Effect.gen(function* () {
@@ -139,6 +212,12 @@ const program = Effect.gen(function* () {
 			`\n  \x1b[32m\x1b[1mDone!\x1b[0m ${ok} pages in ${elapsed}s \x1b[90m(${pps} pages/sec)\x1b[0m\n`,
 		)
 		if (err) process.stderr.write(`  \x1b[31m${err} failed\x1b[0m\n`)
+		
+		// AI Memory transformation
+		if (config.aiMemory) {
+			yield* transformToAIMemory(config)
+		}
+		
 		process.stderr.write("\n")
 	} finally {
 		pool.terminate()

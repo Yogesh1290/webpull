@@ -24,6 +24,13 @@
 		// Some stricter flags (disabled by default)
 		"noUnusedLocals": false,
 		"noUnusedParameters": false,
-		"noPropertyAccessFromIndexSignature": false
+		"noPropertyAccessFromIndexSignature": false,
+
+		// Path mappings for clean imports
+		"baseUrl": ".",
+		"paths": {
+			"webpull/ai-memory": ["./src/ai-memory/index.ts"],
+			"webpull/ai-memory/*": ["./src/ai-memory/*"]
+		}
 	}
 }
