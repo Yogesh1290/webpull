@@ -22,8 +22,11 @@ export async function routeSemanticQuery(
   // Calculate similarity with all nodes that have embeddings
   const scores: Array<{ node: MemoryNode; score: number }> = []
   
+  let hasEmbeddings = false
+
   for (const node of tree.nodes.values()) {
     if (node.metadata.embedding) {
+      hasEmbeddings = true
       const similarity = cosineSimilarity(queryEmbedding, node.metadata.embedding)
       
       // Filter by threshold
@@ -31,6 +34,11 @@ export async function routeSemanticQuery(
         scores.push({ node, score: similarity })
       }
     }
+  }
+  
+  if (!hasEmbeddings) {
+    console.warn('\n⚠️ Warning: Semantic query performed on a tree with no embeddings.')
+    console.warn('   Run webpull with --with-embeddings to generate them, or semantic search will return empty results.\n')
   }
   
   // Sort by similarity descending
@@ -81,14 +89,22 @@ export async function routeHybridQuery(
   }
   
   // Add semantic scores
+  let hasEmbeddings = false
   for (const node of tree.nodes.values()) {
     if (node.metadata.embedding) {
+      hasEmbeddings = true
       const similarity = cosineSimilarity(queryEmbedding, node.metadata.embedding)
       const semanticScore = similarity * semanticWeight
       
       const existingScore = nodeScores.get(node.id) || 0
       nodeScores.set(node.id, existingScore + semanticScore)
     }
+  }
+  
+  if (!hasEmbeddings) {
+    console.warn('\n⚠️ Warning: Hybrid query performed on a tree with no embeddings.')
+    console.warn('   Run webpull with --with-embeddings to enable semantic search capabilities.')
+    console.warn('   Falling back to keyword-only search.\n')
   }
   
   // 4. Sort by combined score

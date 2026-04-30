@@ -16,6 +16,7 @@ interface Config {
 	max: number
 	aiMemory?: boolean
 	aiMemoryOut?: string
+	withEmbeddings?: boolean
 }
 
 /**
@@ -50,7 +51,11 @@ const transformToAIMemory = (config: Config) =>
 			for (const filepath of markdownFiles) {
 				const content = yield* Effect.tryPromise(() => readFile(filepath, 'utf-8'))
 				if (content.trim()) {
-					combinedContent += content + '\n\n'
+					// Extract title to create a page boundary heading
+					const titleMatch = content.match(/^title:\s*"?([^"\n]+)"?/m)
+					const title = titleMatch ? titleMatch[1] : filepath.split(/[\/\\]/).pop()?.replace('.md', '') || 'Page'
+					
+					combinedContent += `# ${title}\n\n` + content + '\n\n'
 				}
 			}
 			
@@ -62,6 +67,25 @@ const transformToAIMemory = (config: Config) =>
 			// Transform combined content into one tree
 			const hostname = new URL(config.url).hostname
 			const tree = transformDocument(combinedContent, config.url, hostname)
+			
+			// Generate embeddings if requested
+			if (config.withEmbeddings) {
+				process.stderr.write('  \x1b[90mGenerating embeddings...\x1b[0m\n')
+				const { generateEmbedding } = yield* Effect.tryPromise(() => import('./ai-memory/embeddings/index.ts'))
+				
+				let count = 0
+				const total = tree.nodes.size
+				
+				for (const node of tree.nodes.values()) {
+					const textToEmbed = `${node.metadata.title}\n\n${node.summary}`
+					node.metadata.embedding = yield* Effect.tryPromise(() => generateEmbedding(textToEmbed))
+					count++
+					if (count % 10 === 0 || count === total) {
+						process.stderr.write(`\r  \x1b[90mGenerating embeddings... ${count}/${total}\x1b[0m`)
+					}
+				}
+				process.stderr.write('\n')
+			}
 			
 			// Save tree
 			const outputPath = join(config.aiMemoryOut || './.ai-memory', `${hostname}.json`)
@@ -89,6 +113,7 @@ const parseArgs = (args: string[]): Config => {
     -m, --max <n>          Max pages (default: 500)
     --ai-memory            Transform docs into AI memory structure
     --ai-memory-out <dir>  AI memory output directory (default: ./.ai-memory)
+    --with-embeddings      Generate embeddings for semantic search
 `)
 		process.exit(0)
 	}
@@ -108,6 +133,7 @@ const parseArgs = (args: string[]): Config => {
 	let max = 500
 	let aiMemory = false
 	let aiMemoryOut = './.ai-memory'
+	let withEmbeddings = false
 
 	for (let i = 1; i < args.length; i++) {
 		const arg = args[i]
@@ -123,10 +149,12 @@ const parseArgs = (args: string[]): Config => {
 		} else if ("--ai-memory-out" === arg && next) {
 			aiMemoryOut = next
 			i++
+		} else if ("--with-embeddings" === arg) {
+			withEmbeddings = true
 		}
 	}
 
-	return { url: url.href, out: resolve(out), max, aiMemory, aiMemoryOut }
+	return { url: url.href, out: resolve(out), max, aiMemory, aiMemoryOut, withEmbeddings }
 }
 
 const program = Effect.gen(function* () {
@@ -163,6 +191,8 @@ const program = Effect.gen(function* () {
 			ui.render({ total, ok, err, elapsed: (now - tDisc) / 1000, workerStates, recentFiles })
 		}
 
+		const writePromises: Promise<any>[] = []
+
 		yield* Effect.tryPromise(() =>
 			pool.pullAll(
 				urls,
@@ -193,7 +223,7 @@ const program = Effect.gen(function* () {
 						if (!filepath.endsWith(".md")) filepath += ".md"
 						recentFiles.push(filepath)
 
-						Effect.runPromise(write(page, config.out))
+						writePromises.push(Effect.runPromise(write(page, config.out)))
 					} else {
 						err++
 					}
@@ -204,6 +234,8 @@ const program = Effect.gen(function* () {
 
 		ui.render({ total, ok, err, elapsed: (performance.now() - tDisc) / 1000, workerStates, recentFiles })
 		ui.finish()
+
+		yield* Effect.tryPromise(() => Promise.all(writePromises))
 
 		const elapsed = ((performance.now() - t0) / 1000).toFixed(1)
 		const pps = Math.round(ok / ((performance.now() - tDisc) / 1000))

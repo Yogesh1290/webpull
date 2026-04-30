@@ -66,13 +66,13 @@ import { loadTree, routeQuery } from 'webpull/ai-memory'
 const tree = await loadTree('./.ai-memory/bun.sh.json')
 
 // Query by path
-const node = routeQuery({ 
+const node = await routeQuery({ 
   type: 'path', 
   path: '/api/file-system' 
 }, tree)
 
 // Query by keywords
-const results = routeQuery({
+const results = await routeQuery({
   type: 'keyword',
   keywords: ['http', 'server'],
   operator: 'AND',
@@ -80,16 +80,16 @@ const results = routeQuery({
 }, tree)
 
 // Semantic search (uses embeddings)
-const answers = routeQuery({
+const answers = await routeQuery({
   type: 'semantic',
-  query: 'How do I create an HTTP server?',
+  question: 'How do I create an HTTP server?',
   maxResults: 5
 }, tree)
 
 // Hybrid search (keyword + semantic)
-const best = routeQuery({
+const best = await routeQuery({
   type: 'hybrid',
-  query: 'HTTP server setup',
+  question: 'HTTP server setup',
   keywordWeight: 0.3,
   semanticWeight: 0.7,
   maxResults: 5
@@ -102,9 +102,9 @@ const best = routeQuery({
 import { GoogleGenerativeAI } from '@google/generative-ai'
 
 // Find relevant sections using hybrid search
-const relevantNodes = routeQuery({
+const relevantNodes = await routeQuery({
   type: 'hybrid',
-  query: userQuestion,
+  question: userQuestion,
   keywordWeight: 0.3,
   semanticWeight: 0.7,
   maxResults: 3
@@ -167,7 +167,7 @@ routeQuery({
 ```typescript
 routeQuery({ 
   type: 'semantic', 
-  query: 'How do I authenticate users?',
+  question: 'How do I authenticate users?',
   maxResults: 5
 }, tree)
 ```
@@ -176,7 +176,7 @@ routeQuery({
 ```typescript
 routeQuery({ 
   type: 'hybrid', 
-  query: 'authentication methods',
+  question: 'authentication methods',
   keywordWeight: 0.3,  // 30% keyword, 70% semantic
   semanticWeight: 0.7,
   maxResults: 5

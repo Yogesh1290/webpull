@@ -107,7 +107,7 @@ function buildNodesRecursive(
 	const siblings: string[] = []
 
 	for (const section of sections) {
-		const node = createNodeFromSection(section, parent.id, sourceUrl, sourceFile, parentPath, depth)
+		const node = createNodeFromSection(section, parent.id, sourceUrl, sourceFile, parentPath, depth, tree)
 
 		tree.nodes.set(node.id, node)
 		parent.childIds.push(node.id)
@@ -153,9 +153,19 @@ function createNodeFromSection(
 	sourceFile: string,
 	parentPath: string,
 	_depth: number,
+	tree: KnowledgeTree,
 ): MemoryNode {
 	const slug = slugify(section.title)
-	const path = joinPath(parentPath, slug)
+	let path = joinPath(parentPath, slug)
+
+	// Deduplicate path
+	let originalPath = path
+	let counter = 2
+	while (tree.index.pathMap.has(path)) {
+		path = `${originalPath}-${counter}`
+		counter++
+	}
+
 	const content = section.content
 	const tokenCount = estimateTokenCount(content)
 	const keywords = extractKeywords(`${section.title} ${content}`)

@@ -7,6 +7,7 @@
 import { GoogleGenAI } from '@google/genai'
 import { loadTree, routeQuery } from '../src/ai-memory/index.ts'
 import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import * as readline from 'node:readline'
 
 async function main() {
@@ -18,7 +19,8 @@ async function main() {
   }
   
   // Check for AI memory
-  if (!existsSync('../.ai-memory')) {
+  const aiMemoryDir = join(import.meta.dir, '../.ai-memory')
+  if (!existsSync(aiMemoryDir)) {
     console.error('❌ No .ai-memory folder found')
     console.log('Run: bun run src/index.ts https://bun.sh/docs --ai-memory -m 30\n')
     process.exit(1)
@@ -26,7 +28,7 @@ async function main() {
   
   // Load tree
   const { readdir } = await import('node:fs/promises')
-  const files = (await readdir('../.ai-memory')).filter(f => f.endsWith('.json'))
+  const files = (await readdir(aiMemoryDir)).filter(f => f.endsWith('.json'))
   
   if (files.length === 0) {
     console.error('❌ No JSON files in .ai-memory/')
@@ -39,7 +41,7 @@ async function main() {
     process.exit(1)
   }
   
-  const tree = await loadTree(`../.ai-memory/${docFile}`)
+  const tree = await loadTree(join(aiMemoryDir, docFile))
   const docName = docFile.replace('.json', '')
   
   // Check if embeddings exist
